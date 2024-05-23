@@ -2,7 +2,7 @@
   @ author: bcynuaa <bcynuaa@163.com> | callm1101 <Calm.Liu@outlook.com>
   @ date: 2024/05/21 17:56:22
   @ license: MIT
-  @ description:
+  @ description: use `.vtp` for output, and add some helper functions
  =#
 
 const kFileExtension = ".vtp"
@@ -14,7 +14,14 @@ const kVelocityString = "Velocity"
 
 @inline function assurePathExist(path::String)::Nothing
     if !isdir(path)
-        mkdir(path)
+        @info "Create directory: $path"
+        mkpath(path)
+    else
+        # remove all files in the directory
+        @info "Remove all files in directory: $path"
+        for file in readdir(path)
+            rm(joinpath(path, file))
+        end
     end
     return nothing
 end

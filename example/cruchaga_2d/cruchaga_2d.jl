@@ -1,6 +1,6 @@
 #=
   @ author: bcynuaa <bcynuaa@163.com> | callm1101 <Calm.Liu@outlook.com>
-  @ date: 2024/05/23 01:43:22
+  @ date: 2024/05/23 17:57:47
   @ license: MIT
   @ description:
  =#
@@ -10,15 +10,16 @@ using Parameters
 using ProgressBars
 
 const dim = 2
-const dr = 0.01
+const dr = 0.002
+const gap = dr
 const h = 3 * dr
 
 const smooth_kernel = SmoothKernel(h, dim, CubicSpline)
 
-const water_width = 1.0
-const water_height = 2.0
-const box_width = 4.0
-const box_height = 3.0
+const water_width = 0.114
+const water_height = 0.114
+const box_width = 0.42
+const box_height = 0.44
 const wall_width = h
 
 const rho_0 = 1000.0
@@ -29,10 +30,18 @@ const g = RealVector(0.0, -gravity, 0.0)
 const mu = 1e-3
 const nu = mu / rho_0
 
+@inline function getPressureFromDensity(rho::Float64)::Float64
+    return c^2 * (rho - rho_0)
+end
+
+@inline function getDensityFromPressure(p::Float64)::Float64
+    return p / c^2 + rho_0
+end
+
 const dt = 0.1 * h / c
-const t_end = 4.0
+const t_end = 3.0
 const output_dt = 100 * dt
-const density_filter_dt = 100 * dt
+const density_filter_dt = 20 * dt
 
 const FLUID_TAG = 1
 const WALL_TAG = 2
@@ -50,7 +59,7 @@ const WALL_TAG = 2
     dv_vec_::RealVector = kVec0
     c_::Float64 = c
     mu_::Float64 = mu
-    gap_::Float64 = dr
+    gap_::Float64 = gap
     sum_kernel_weight_::Float64 = 0.0
     sum_kernel_weighted_value_::Float64 = 0.0
     normal_vec_::RealVector = kVec0
@@ -59,7 +68,7 @@ end
 @inline function updateDensityAndPressure!(p::Particle)::Nothing
     if p.type_ == FLUID_TAG
         libUpdateDensity!(p; dt = dt / 2)
-        p.p_ = c^2 * (p.rho_ - rho_0)
+        p.p_ = getPressureFromDensity(p.rho_)
         return nothing
     else
         return nothing
@@ -142,7 +151,7 @@ end
 @inline function densityFilter!(p::Particle)::Nothing
     if p.type_ == FLUID_TAG
         libKernelAverageDensityFilter!(p; smooth_kernel = smooth_kernel)
-        p.p_ = c^2 * (p.rho_ - rho_0)
+        p.p_ = getPressureFromDensity(p.rho_)
         return nothing
     else
         return nothing
@@ -182,7 +191,7 @@ const y0 = 0.0
 function initialPressure!(p::Particle)::Nothing
     depth = water_height - p.x_vec_[2]
     p.p_ = rho_0 * gravity * depth
-    p.rho_ += p.p_ / p.c_^2
+    p.rho_ = getDensityFromPressure(p.p_)
     return nothing
 end
 
@@ -243,6 +252,23 @@ right_wall_particles = createRectangleParticles(
 )
 append!(particles, right_wall_particles)
 
+@inline function topWallParticleModify!(p::Particle)::Nothing
+    p.normal_vec_ = -kVecY
+    p.type_ = WALL_TAG
+    p.mu_ *= 1000
+    return nothing
+end
+top_wall_particles = createRectangleParticles(
+    Particle,
+    x0,
+    y0 + box_height,
+    box_width,
+    wall_width,
+    dr;
+    modifyOnParticle! = topWallParticleModify!,
+)
+append!(particles, top_wall_particles)
+
 @inline function leftBottomCornerParticleModify!(p::Particle)::Nothing
     p.normal_vec_ = (kVecX + kVecY) / sqrt(2)
     p.type_ = WALL_TAG
@@ -277,6 +303,40 @@ right_bottom_corner_particles = createRectangleParticles(
 )
 append!(particles, right_bottom_corner_particles)
 
+@inline function leftTopCornerParticleModify!(p::Particle)::Nothing
+    p.normal_vec_ = (kVecX - kVecY) / sqrt(2)
+    p.type_ = WALL_TAG
+    p.mu_ *= 1000
+    return nothing
+end
+left_top_corner_particles = createRectangleParticles(
+    Particle,
+    x0 - wall_width,
+    y0 + box_height,
+    wall_width,
+    wall_width,
+    dr;
+    modifyOnParticle! = leftTopCornerParticleModify!,
+)
+append!(particles, left_top_corner_particles)
+
+@inline function rightTopCornerParticleModify!(p::Particle)::Nothing
+    p.normal_vec_ = (-kVecX - kVecY) / sqrt(2)
+    p.type_ = WALL_TAG
+    p.mu_ *= 1000
+    return nothing
+end
+right_top_corner_particles = createRectangleParticles(
+    Particle,
+    x0 + box_width,
+    y0 + box_height,
+    wall_width,
+    wall_width,
+    dr;
+    modifyOnParticle! = rightTopCornerParticleModify!,
+)
+append!(particles, right_top_corner_particles)
+
 start_point = RealVector(-h, -h, 0.0)
 end_point = RealVector(box_width + h, box_height + h, 0.0)
 system = ParticleSystem(Particle, h, start_point, end_point)
@@ -289,9 +349,10 @@ vtp_io = VTPIO()
 addScalar!(vtp_io, "Pressure", getPressure)
 addVector!(vtp_io, "Velocity", getVelocity)
 addVector!(vtp_io, "Normal", getNormalVector)
+
 vtp_io.step_digit_ = 4
-vtp_io.file_name_ = "collapse_dry"
-vtp_io.output_path_ = "example/results/collapse_dry_results"
+vtp_io.file_name_ = "cruchaga_2d"
+vtp_io.output_path_ = "example/results/cruchaga_2d_results"
 vtp_io
 
 function main()::Nothing

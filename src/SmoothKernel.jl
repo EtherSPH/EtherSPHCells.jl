@@ -2,7 +2,7 @@
   @ author: bcynuaa <bcynuaa@163.com> | callm1101 <Calm.Liu@outlook.com>
   @ date: 2024/05/21 17:25:16
   @ license: MIT
-  @ description:
+  @ description: different type of smooth kernel
  =#
 
 abstract type SmoothKernel end
@@ -145,3 +145,5 @@ const kSmoothKernelParametersDict = Dict(
     kernel_0 = sigma
     return SmoothKernelType(h, dim, radius_ratio, influence_radius, sigma, kernel_0)
 end
+
+const kSmoothKernel = SmoothKernel(1.0, 2, WendlandC2)

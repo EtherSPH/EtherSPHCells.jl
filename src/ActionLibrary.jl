@@ -2,7 +2,7 @@
   @ author: bcynuaa <bcynuaa@163.com> | callm1101 <Calm.Liu@outlook.com>
   @ date: 2024/05/23 14:34:01
   @ license: MIT
-  @ description:
+  @ description: the basic action library, can be used freely in customized SPH solver
  =#
 
 """
@@ -28,7 +28,7 @@ harmonicMean(1.0, 2.0)
 end
 
 """
-    updateVelocity!(p::T; dt::Float64 = 0.0, body_force_vec::RealVector = kVec0)
+    libUpdateVelocity!(p::T; dt::Float64 = 0.0, body_force_vec::RealVector = kVec0)
 
 Update the velocity of the particle `p` with the time step `dt` and the body force `body_force_vec`.
 
@@ -43,7 +43,7 @@ Update the velocity of the particle `p` with the time step `dt` and the body for
 # Returns:
 - `Nothing`
 """
-@inline function updateVelocity!(
+@inline function libUpdateVelocity!(
     p::T;
     dt::Float64 = 0.0,
     body_force_vec::RealVector = kVec0,
@@ -54,7 +54,7 @@ Update the velocity of the particle `p` with the time step `dt` and the body for
 end
 
 """
-    updatePosition!(p::T; dt::Float64 = 0.0)
+    libUpdatePosition!(p::T; dt::Float64 = 0.0)
 
 Update the position of the particle `p` with the time step `dt`.
 
@@ -68,13 +68,13 @@ Update the position of the particle `p` with the time step `dt`.
 # Returns:
 - `Nothing`
 """
-@inline function updatePosition!(p::T; dt::Float64 = 0.0)::Nothing where {T <: AbstractParticle}
+@inline function libUpdatePosition!(p::T; dt::Float64 = 0.0)::Nothing where {T <: AbstractParticle}
     p.x_vec_ += p.v_vec_ * dt
     return nothing
 end
 
 """
-    updateDensityAndPressure!(p::T; dt::Float64 = 0.0)
+    libUpdateDensityAndPressure!(p::T; dt::Float64 = 0.0)
 
 Update the density and pressure of the particle `p` with the time step `dt`.
 
@@ -90,7 +90,7 @@ Update the density and pressure of the particle `p` with the time step `dt`.
 # Returns:
 - `Nothing`
 """
-@inline function updateVelocityAndPosition!(
+@inline function libUpdateVelocityAndPosition!(
     p::T;
     dt::Float64 = 0.0,
     body_force_vec::RealVector = kVec0,
@@ -102,7 +102,7 @@ Update the density and pressure of the particle `p` with the time step `dt`.
 end
 
 """
-    updateDensity!(p::T; dt::Float64 = 0.0)
+    libUpdateDensity!(p::T; dt::Float64 = 0.0)
 
 Update the density of the particle `p` with the time step `dt`.
 
@@ -120,14 +120,14 @@ Update the density of the particle `p` with the time step `dt`.
 
 Usually, pressure should be updated after this function is called, which depends on your thermodynamic model.
 """
-@inline function updateDensity!(p::T; dt::Float64 = 0.0)::Nothing where {T <: AbstractParticle}
+@inline function libUpdateDensity!(p::T; dt::Float64 = 0.0)::Nothing where {T <: AbstractParticle}
     p.rho_ += p.drho_ * dt
     p.drho_ = 0.0
     return nothing
 end
 
 """
-    continuity!(p::T, q::T, r::Float64; kernel_gradient::Float64 = 0.0)
+    libContinuity!(p::T, q::T, r::Float64; kernel_gradient::Float64 = 0.0)
 
 Update the continuity of the particle `p` and `q` with the distance `r` and the kernel gradient `kernel_gradient`.
 
@@ -148,7 +148,7 @@ Update the continuity of the particle `p` and `q` with the distance `r` and the 
 
 In SPH method, |∇Wᵢⱼ| = ⃗r⋅∇Wᵢⱼ / r, `kernel_gradient` is |∇Wᵢⱼ|, thus, ∇Wᵢⱼ is `kernel_gradient * (p.x_vec_ - q.x_vec_) / r`.
 """
-@inline function continuity!(
+@inline function libContinuity!(
     p::T,
     q::T,
     r::Float64;
@@ -159,7 +159,7 @@ In SPH method, |∇Wᵢⱼ| = ⃗r⋅∇Wᵢⱼ / r, `kernel_gradient` is |∇W�
 end
 
 """
-    pressureForce!(p::T, q::T, r::Float64; kernel_value::Float64 = 0.0, kernel_gradient::Float64 = 0.0, reference_kernel_value::Float64 = 1.0)
+    libPressureForce!(p::T, q::T, r::Float64; kernel_value::Float64 = 0.0, kernel_gradient::Float64 = 0.0, reference_kernel_value::Float64 = 1.0)
 
 Update the pressure force of the particle `p` with the particle `q` and the distance `r`.
 
@@ -183,7 +183,7 @@ Update the pressure force of the particle `p` with the particle `q` and the dist
 
 In SPH method, to avoid too close distance, a cofficient 0.01 Wᵢⱼ/W(Δp) is added to the pressure term.
 """
-@inline function pressureForce!(
+@inline function libPressureForce!(
     p::T,
     q::T,
     r::Float64;
@@ -198,7 +198,7 @@ In SPH method, to avoid too close distance, a cofficient 0.01 Wᵢⱼ/W(Δp) is 
 end
 
 """
-    viscosityForce!(p::T, q::T, r::Float64; kernel_gradient::Float64 = 0.0, h::Float64 = 1.0)
+    libViscosityForce!(p::T, q::T, r::Float64; kernel_gradient::Float64 = 0.0, h::Float64 = 1.0)
 
 Update the viscosity force of the particle `p` with the particle `q` and the distance `r`.
 
@@ -221,7 +221,7 @@ Update the viscosity force of the particle `p` with the particle `q` and the dis
 1. in SPH method, harmonic mean of parameters is often used in discontinuous media.
 2. formula of viscosity force takes advantage of a trick in Taylor expansion.
 """
-@inline function viscosityForce!(
+@inline function libViscosityForce!(
     p::T,
     q::T,
     r::Float64;
@@ -231,7 +231,7 @@ Update the viscosity force of the particle `p` with the particle `q` and the dis
     mean_mu = harmonicMean(p.mu_, q.mu_)
     sum_rho = p.rho_ + q.rho_
     viscosity_force = 8 * mean_mu * kernel_gradient * r / sum_rho^2 / (r^2 + 0.01 * h^2)
-    p.dv_vec_ += viscosity_force * (q.v_vec_ - p.v_vec_)
+    p.dv_vec_ += viscosity_force * (p.v_vec_ - q.v_vec_)
     return nothing
 end
 
@@ -258,7 +258,7 @@ Update the compulsive force of the particle `p` with the particle `q` and the di
 
 The paper is from Roger & Dalrmple, 2008, DualSPHysics also adopts this model. Such force blocks the particles from penetrating the wall with given normal vector.
 """
-@inline function compulsiveForce!(p::T, q::T, r::Float64; h::Float64 = 1.0)::Nothing where {T <: AbstractParticle}
+@inline function libCompulsiveForce!(p::T, q::T, r::Float64; h::Float64 = 1.0)::Nothing where {T <: AbstractParticle}
     psi = abs(dot(p.x_vec_ - q.x_vec_, q.normal_vec_))
     xi = sqrt(max(0.0, r^2 - psi^2))
     eta = psi / q.gap_
@@ -296,11 +296,11 @@ Update the kernel average density filter of the particle `p` with the particle `
 
 ρᵢ = ∑ⱼmⱼWᵢⱼ / ∑ⱼmⱼ/ρⱼWᵢⱼ, see also `kernelAverageDensityFilter!(p::T, smooth_kernel::SmoothKernel)`.
 """
-@inline function kernelAverageDensityFilter!(
+@inline function libKernelAverageDensityFilter!(
     p::T,
     q::T,
-    r::Float64,
-    smooth_kernel::SmoothKernel,
+    r::Float64;
+    smooth_kernel::SmoothKernel = kSmoothKernel,
 )::Nothing where {T <: AbstractParticle}
     kernel_value = kernelValue(r, smooth_kernel)
     p.sum_kernel_weighted_value_ += q.mass_ * kernel_value
@@ -329,7 +329,10 @@ Update the kernel average density filter of the particle `p` with the smoothing 
 
 ρᵢ = ∑ⱼmⱼWᵢⱼ / ∑ⱼmⱼ/ρⱼWᵢⱼ, see also `kernelAverageDensityFilter!(p::T, q::T, r::Float64; smooth_kernel::SmoothKernel)`.
 """
-@inline function kernelAverageDensityFilter!(p::T, smooth_kernel::SmoothKernel)::Nothing where {T <: AbstractParticle}
+@inline function libKernelAverageDensityFilter!(
+    p::T;
+    smooth_kernel::SmoothKernel = kSmoothKernel,
+)::Nothing where {T <: AbstractParticle}
     p.sum_kernel_weighted_value_ += p.mass_ * smooth_kernel.kernel_0_
     p.sum_kernel_weight_ += p.mass_ / p.rho_ * smooth_kernel.kernel_0_
     p.rho_ = p.sum_kernel_weighted_value_ / p.sum_kernel_weight_

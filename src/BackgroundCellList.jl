@@ -2,7 +2,7 @@
   @ author: bcynuaa <bcynuaa@163.com> | callm1101 <Calm.Liu@outlook.com>
   @ date: 2024/05/21 00:46:17
   @ license: MIT
-  @ description:
+  @ description: the background cell list used in the particle system
  =#
 
 mutable struct BackgroundCellList

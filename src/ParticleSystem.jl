@@ -2,7 +2,7 @@
   @ author: bcynuaa <bcynuaa@163.com> | callm1101 <Calm.Liu@outlook.com>
   @ date: 2024/05/21 00:44:17
   @ license: MIT
-  @ description:
+  @ description: the core file, allow flexible custom usage
  =#
 
 # * default AbstractParticle must at least have fields:

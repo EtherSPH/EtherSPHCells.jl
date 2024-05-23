@@ -2,7 +2,7 @@
   @ author: bcynuaa <bcynuaa@163.com> | callm1101 <Calm.Liu@outlook.com>
   @ date: 2024/05/19 16:34:08
   @ license: MIT
-  @ description:
+  @ description: the basic math functions and containers
  =#
 
 const IntegerVector = SVector{3, Int64}

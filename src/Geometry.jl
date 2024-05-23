@@ -2,7 +2,7 @@
   @ author: bcynuaa <bcynuaa@163.com> | callm1101 <Calm.Liu@outlook.com>
   @ date: 2024/05/20 14:57:59
   @ license: MIT
-  @ description:
+  @ description: the basic geometry, wait for further development
  =#
 
 abstract type Shape end

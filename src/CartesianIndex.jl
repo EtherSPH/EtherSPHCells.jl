@@ -2,7 +2,7 @@
   @ author: bcynuaa <bcynuaa@163.com> | callm1101 <Calm.Liu@outlook.com>
   @ date: 2024/05/20 22:12:38
   @ license: MIT
-  @ description:
+  @ description: 3d cartesian index and range used in the cell list neighbour search
  =#
 
 @inline function getCartesian3DIndexFromGlobalIndex(

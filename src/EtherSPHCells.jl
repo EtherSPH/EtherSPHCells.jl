@@ -22,6 +22,7 @@ include("Cell.jl")
 include("BackgroundCellList.jl")
 include("ParticleSystem.jl") # core file
 include("PostProcess.jl")
+include("ActionLibrary.jl")
 
 JuliaFormatter.format(
     ".",

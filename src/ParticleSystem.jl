@@ -12,6 +12,14 @@
 # * - type_::Int64
 abstract type AbstractParticle end
 
+@inline function distance(p::AbstractParticle, q::AbstractParticle)::Float64
+    return norm(p.x_vec_ - q.x_vec_)
+end
+
+@inline function noneFunction!(p::AbstractParticle)::Nothing
+    return nothing
+end
+
 mutable struct ParticleSystem{ParticleType <: AbstractParticle}
     particles_::Vector{ParticleType}
     background_cell_list_::BackgroundCellList
@@ -50,6 +58,14 @@ function ParticleSystem(
     calculation_domain_bounding_box = CalculationDomainBoundingBox(start_point, end_point)
     return ParticleSystem(particle_type, reference_smoothing_radius, calculation_domain_bounding_box)
 end
+
+Base.show(io::IO, p::ParticleSystem) = print(
+    io,
+    "ParticleSystem:\n",
+    "    with particle type $(getParticleType(p))\n",
+    "    and $(length(p.particles_)) particles\n",
+    "   in background cell list $(p.background_cell_list_)",
+)
 
 @inline getParticleType(::ParticleSystem{ParticleType}) where {ParticleType} = ParticleType
 
@@ -120,7 +136,7 @@ end
                 continue
             end
             q = particle_system.particles_[q_id]
-            r = norm(p.x_vec_ - q.x_vec_)
+            r = distance(p, q)
             if r > particle_system.background_cell_list_.reference_smoothing_radius_
                 continue
             end

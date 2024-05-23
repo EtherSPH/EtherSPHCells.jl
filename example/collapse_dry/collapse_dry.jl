@@ -1,12 +1,13 @@
 #=
   @ author: bcynuaa <bcynuaa@163.com> | callm1101 <Calm.Liu@outlook.com>
-  @ date: 2024/05/22 21:13:10
+  @ date: 2024/05/23 01:43:22
   @ license: MIT
   @ description:
  =#
 
 using EtherSPHCells
 using Parameters
+using ProgressBars
 
 const dim = 2
 const dr = 0.01
@@ -29,9 +30,9 @@ const mu = 1e-3
 const nu = mu / rho_0
 
 const dt = 0.1 * h / c
-const t_end = 3.0
+const t_end = 4.0
 const output_dt = 100 * dt
-const density_filter_dt = 30 * dt
+const density_filter_dt = 100 * dt
 
 const FLUID_TAG = 1
 const WALL_TAG = 2
@@ -57,8 +58,7 @@ end
 
 @inline function updateDensityAndPressure!(p::Particle)::Nothing
     if p.type_ == FLUID_TAG
-        p.rho_ += p.drho_ * dt / 2
-        p.drho_ = 0.0
+        EtherSPHCells.updateDensity!(p; dt = dt / 2)
         p.p_ = c^2 * (p.rho_ - rho_0)
         return nothing
     else
@@ -70,7 +70,7 @@ end
 @inline function continuity!(p::Particle, q::Particle, r::Float64)::Nothing
     if p.type_ == FLUID_TAG && q.type_ == FLUID_TAG
         kernel_gradient = kernelGradient(r, smooth_kernel)
-        p.drho_ += q.mass_ * dot(p.v_vec_ - q.v_vec_, p.x_vec_ - q.x_vec_) * kernel_gradient / r
+        EtherSPHCells.continuity!(p, q, r; kernel_gradient = kernel_gradient)
         return nothing
     else
         return nothing
@@ -84,36 +84,24 @@ end
         kernel_value = kernelValue(r, smooth_kernel)
         kernel_gradient = kernelGradient(r, smooth_kernel)
         mean_gap = (p.gap_ + q.gap_) / 2
-        p_rho_2 = p.p_ / p.rho_^2 + q.p_ / q.rho_^2
         reference_kernel_value = kernelValue(mean_gap, smooth_kernel)
-        p_rho_2 += abs(p_rho_2) * 0.01 * kernel_value / reference_kernel_value
-        p.dv_vec_ += -q.mass_ * p_rho_2 * kernel_gradient / r * (p.x_vec_ - q.x_vec_)
+        EtherSPHCells.pressureForce!(
+            p,
+            q,
+            r;
+            kernel_value = kernel_value,
+            kernel_gradient = kernel_gradient,
+            reference_kernel_value = reference_kernel_value,
+        )
         # * viscosity term
-        mean_mu = 2 * p.mu_ * q.mu_ / (p.mu_ + q.mu_)
-        sum_rho = p.rho_ + q.rho_
-        viscosity_force = 8 * mean_mu * kernel_gradient * r / sum_rho^2 / (r^2 + 0.01 * h^2)
-        p.dv_vec_ += q.mass_ * viscosity_force * (q.v_vec_ - p.v_vec_)
+        EtherSPHCells.viscosityForce!(p, q, r; kernel_gradient = kernel_gradient, h = h / 2)
         return nothing
     elseif p.type_ == FLUID_TAG && q.type_ == WALL_TAG
         # * viscosity term
         kernel_gradient = kernelGradient(r, smooth_kernel)
-        mean_mu = 2 * p.mu_ * q.mu_ / (p.mu_ + q.mu_)
-        sum_rho = p.rho_ + q.rho_
-        viscosity_force = 8 * mean_mu * kernel_gradient * r / sum_rho^2 / (r^2 + 0.01 * h^2)
-        p.dv_vec_ += q.mass_ * viscosity_force * (q.v_vec_ - p.v_vec_)
+        EtherSPHCells.viscosityForce!(p, q, r; kernel_gradient = kernel_gradient, h = h / 2)
         # * compulsive term
-        psi = abs(dot(p.x_vec_ - q.x_vec_, q.normal_vec_))
-        xi = sqrt(max(0.0, r^2 - psi^2))
-        eta = psi / q.gap_
-        if eta > 1 || xi > q.gap_
-            return nothing
-        end
-        p_xi = abs(1 + cos(pi * xi / q.gap_) / 2)
-        verticle_v = dot(p.v_vec_ - q.v_vec_, q.normal_vec_)
-        beta = verticle_v > 0 ? 0.0 : 1.0
-        r_psi = (0.01 * p.c_^2 + beta * p.c_ * abs(verticle_v)) / h * abs(1 - eta) / sqrt(eta)
-        wall_force = r_psi * p_xi
-        p.dv_vec_ += wall_force * q.normal_vec_
+        EtherSPHCells.compulsiveForce!(p, q, r; h = h / 2)
         return nothing
     else
         return nothing
@@ -123,8 +111,7 @@ end
 
 @inline function updateVelocity!(p::Particle)::Nothing
     if p.type_ == FLUID_TAG
-        p.v_vec_ += (p.dv_vec_ + g) * dt / 2
-        p.dv_vec_ = kVec0
+        EtherSPHCells.updateVelocity!(p; dt = dt / 2, body_force_vec = g)
         return nothing
     else
         return nothing
@@ -134,7 +121,7 @@ end
 
 @inline function updatePosition!(p::Particle)::Nothing
     if p.type_ == FLUID_TAG
-        p.x_vec_ += p.v_vec_ * dt
+        EtherSPHCells.updatePosition!(p; dt = dt / 2)
         return nothing
     else
         return nothing
@@ -142,11 +129,9 @@ end
     return nothing
 end
 
-@inline function densityFilter!(p::Particle, q::Particle, r::Float64)::Nothing
+@inline function densityFilter!(p::Particle, q::Particle, r::Float64;)::Nothing
     if p.type_ == FLUID_TAG && q.type_ == FLUID_TAG
-        kernel_value = kernelValue(r, smooth_kernel)
-        p.sum_kernel_weighted_value_ += q.mass_ * kernel_value
-        p.sum_kernel_weight_ += q.mass_ / q.rho_ * kernel_value
+        EtherSPHCells.kernelAverageDensityFilter!(p, q, r, smooth_kernel)
         return nothing
     else
         return nothing
@@ -156,12 +141,8 @@ end
 
 @inline function densityFilter!(p::Particle)::Nothing
     if p.type_ == FLUID_TAG
-        p.sum_kernel_weighted_value_ += p.mass_ * smooth_kernel.kernel_0_
-        p.sum_kernel_weight_ += p.mass_ / p.rho_ * smooth_kernel.kernel_0_
-        p.rho_ = p.sum_kernel_weighted_value_ / p.sum_kernel_weight_
+        EtherSPHCells.kernelAverageDensityFilter!(p, smooth_kernel)
         p.p_ = c^2 * (p.rho_ - rho_0)
-        p.sum_kernel_weight_ = 0.0
-        p.sum_kernel_weighted_value_ = 0.0
         return nothing
     else
         return nothing
@@ -176,7 +157,7 @@ function createRectangleParticles(
     width::Float64,
     height::Float64,
     reference_dr::Float64;
-    modifyOnParticle!::Function = EtherSPHCells.selfaction!,
+    modifyOnParticle!::Function = EtherSPHCells.noneFunction!,
 )::Vector{ParticleType}
     particles = Vector{ParticleType}()
     n_along_x = Int64(width / reference_dr |> round)
@@ -295,3 +276,48 @@ right_bottom_corner_particles = createRectangleParticles(
     modifyOnParticle! = rightBottomCornerParticleModify!,
 )
 append!(particles, right_bottom_corner_particles)
+
+start_point = RealVector(-h, -h, 0.0)
+end_point = RealVector(box_width + h, box_height + h, 0.0)
+system = ParticleSystem(Particle, h, start_point, end_point)
+append!(system.particles_, particles)
+
+vtp_io = VTPIO()
+@inline getPressure(p::Particle)::Float64 = p.p_
+@inline getVelocity(p::Particle)::RealVector = p.v_vec_
+@inline getNormalVector(p::Particle)::RealVector = p.normal_vec_
+addScalar!(vtp_io, "Pressure", getPressure)
+addVector!(vtp_io, "Velocity", getVelocity)
+addVector!(vtp_io, "Normal", getNormalVector)
+vtp_io.step_digit_ = 4
+vtp_io.file_name_ = "collapse_dry"
+vtp_io.output_path_ = "example/results/collapse_dry_results"
+vtp_io
+
+function main()::Nothing
+    assurePathExist(vtp_io)
+    t = 0.0
+    saveVTP(vtp_io, system, 0, t)
+    updateBackgroundCellList!(system)
+    applyInteraction!(system, momentum!)
+    for step in ProgressBar(1:round(Int, t_end / dt))
+        applySelfaction!(system, updateVelocity!)
+        applySelfaction!(system, updatePosition!)
+        updateBackgroundCellList!(system)
+        applyInteraction!(system, continuity!)
+        applySelfaction!(system, updateDensityAndPressure!)
+        applySelfaction!(system, updatePosition!)
+        updateBackgroundCellList!(system)
+        applyInteraction!(system, momentum!)
+        applySelfaction!(system, updateVelocity!)
+        if step % round(Int, output_dt / dt) == 0
+            saveVTP(vtp_io, system, step, t)
+        end
+        if step % round(Int, density_filter_dt / dt) == 0
+            applyInteraction!(system, densityFilter!)
+            applySelfaction!(system, densityFilter!)
+        end
+        t += dt
+    end
+    return nothing
+end

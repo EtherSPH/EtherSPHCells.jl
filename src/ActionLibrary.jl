@@ -42,6 +42,10 @@ Update the velocity of the particle `p` with the time step `dt` and the body for
 
 # Returns:
 - `Nothing`
+
+# Warning:
+
+This function does not reset `dv_vec_` (acceleration) to zero.
 """
 @inline function libUpdateVelocity!(
     p::T;
@@ -49,7 +53,6 @@ Update the velocity of the particle `p` with the time step `dt` and the body for
     body_force_vec::RealVector = kVec0,
 )::Nothing where {T <: AbstractParticle}
     p.v_vec_ += (p.dv_vec_ + body_force_vec) * dt
-    p.dv_vec_ = kVec0
     return nothing
 end
 
@@ -63,13 +66,19 @@ Update the position of the particle `p` with the time step `dt`.
 - `p` is a subtype of `AbstractParticle` with properties:
     - `x_vec_::RealVector`: the position of the particle.
     - `v_vec_::RealVector`: the velocity of the particle.
+    - `dv_vec_::RealVector`: the acceleration of the particle.
 - `dt` is the time step.
 
 # Returns:
 - `Nothing`
+
+# Warning:
+
+This function resets `dv_vec_` (acceleration) to zero.
 """
 @inline function libUpdatePosition!(p::T; dt::Float64 = 0.0)::Nothing where {T <: AbstractParticle}
     p.x_vec_ += p.v_vec_ * dt
+    p.dv_vec_ = kVec0
     return nothing
 end
 
@@ -209,6 +218,7 @@ Update the viscosity force of the particle `p` with the particle `q` and the dis
     - `rho_::Float64`: the density of the particle.
     - `v_vec_::RealVector`: the velocity of the particle.
     - `dv_vec_::RealVector`: the acceleration of the particle.
+    - `mass_::Float64`:
 - `r` is the distance between the particles.
 - `kernel_gradient` is the gradient of the kernel function.
 - `h` is the smoothing length, sometimes is the half of the smoothing length to avoid sigularity.
@@ -231,7 +241,7 @@ Update the viscosity force of the particle `p` with the particle `q` and the dis
     mean_mu = harmonicMean(p.mu_, q.mu_)
     sum_rho = p.rho_ + q.rho_
     viscosity_force = 8 * mean_mu * kernel_gradient * r / sum_rho^2 / (r^2 + 0.01 * h^2)
-    p.dv_vec_ += viscosity_force * (p.v_vec_ - q.v_vec_)
+    p.dv_vec_ += q.mass_ * viscosity_force * (p.v_vec_ - q.v_vec_)
     return nothing
 end
 

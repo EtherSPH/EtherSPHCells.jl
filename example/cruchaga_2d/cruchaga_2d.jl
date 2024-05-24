@@ -5,6 +5,8 @@
   @ description:
  =#
 
+# M.A. Cruchaga
+
 using EtherSPHCells
 using Parameters
 using ProgressBars
@@ -28,6 +30,7 @@ const gravity = 9.8
 const c = 10 * sqrt(2 * gravity * water_height)
 const g = RealVector(0.0, -gravity, 0.0)
 const mu = 1e-3
+const mu_wall = mu * 1000
 const nu = mu / rho_0
 
 @inline function getPressureFromDensity(rho::Float64)::Float64
@@ -41,7 +44,7 @@ end
 const dt = 0.1 * h / c
 const t_end = 3.0
 const output_dt = 100 * dt
-const density_filter_dt = 20 * dt
+const density_filter_dt = 10 * dt
 
 const FLUID_TAG = 1
 const WALL_TAG = 2
@@ -67,7 +70,7 @@ end
 
 @inline function updateDensityAndPressure!(p::Particle)::Nothing
     if p.type_ == FLUID_TAG
-        libUpdateDensity!(p; dt = dt / 2)
+        libUpdateDensity!(p; dt = dt)
         p.p_ = getPressureFromDensity(p.rho_)
         return nothing
     else
@@ -118,19 +121,9 @@ end
     return nothing
 end
 
-@inline function updateVelocity!(p::Particle)::Nothing
+@inline function updateVelocityAndPosition!(p::Particle)::Nothing
     if p.type_ == FLUID_TAG
-        libUpdateVelocity!(p; dt = dt / 2, body_force_vec = g)
-        return nothing
-    else
-        return nothing
-    end
-    return nothing
-end
-
-@inline function updatePosition!(p::Particle)::Nothing
-    if p.type_ == FLUID_TAG
-        libUpdatePosition!(p; dt = dt / 2)
+        libUpdateVelocityAndPosition!(p; dt = dt, body_force_vec = g)
         return nothing
     else
         return nothing
@@ -204,7 +197,7 @@ append!(particles, fluid_particles)
 @inline function bottomParticleModify!(p::Particle)::Nothing
     p.normal_vec_ = kVecY
     p.type_ = WALL_TAG
-    p.mu_ *= 1000
+    p.mu_ = mu_wall
     return nothing
 end
 bottom_wall_particles = createRectangleParticles(
@@ -221,7 +214,7 @@ append!(particles, bottom_wall_particles)
 @inline function leftWallParticleModify!(p::Particle)::Nothing
     p.normal_vec_ = kVecX
     p.type_ = WALL_TAG
-    p.mu_ *= 1000
+    p.mu_ = mu_wall
     return nothing
 end
 left_wall_particles = createRectangleParticles(
@@ -238,7 +231,7 @@ append!(particles, left_wall_particles)
 @inline function rightWallParticleModify!(p::Particle)::Nothing
     p.normal_vec_ = -kVecX
     p.type_ = WALL_TAG
-    p.mu_ *= 1000
+    p.mu_ = mu_wall
     return nothing
 end
 right_wall_particles = createRectangleParticles(
@@ -255,7 +248,7 @@ append!(particles, right_wall_particles)
 @inline function topWallParticleModify!(p::Particle)::Nothing
     p.normal_vec_ = -kVecY
     p.type_ = WALL_TAG
-    p.mu_ *= 1000
+    p.mu_ = mu_wall
     return nothing
 end
 top_wall_particles = createRectangleParticles(
@@ -272,7 +265,7 @@ append!(particles, top_wall_particles)
 @inline function leftBottomCornerParticleModify!(p::Particle)::Nothing
     p.normal_vec_ = (kVecX + kVecY) / sqrt(2)
     p.type_ = WALL_TAG
-    p.mu_ *= 1000
+    p.mu_ = mu_wall
     return nothing
 end
 left_bottom_corner_particles = createRectangleParticles(
@@ -289,7 +282,7 @@ append!(particles, left_bottom_corner_particles)
 @inline function rightBottomCornerParticleModify!(p::Particle)::Nothing
     p.normal_vec_ = (-kVecX + kVecY) / sqrt(2)
     p.type_ = WALL_TAG
-    p.mu_ *= 1000
+    p.mu_ = mu_wall
     return nothing
 end
 right_bottom_corner_particles = createRectangleParticles(
@@ -306,7 +299,7 @@ append!(particles, right_bottom_corner_particles)
 @inline function leftTopCornerParticleModify!(p::Particle)::Nothing
     p.normal_vec_ = (kVecX - kVecY) / sqrt(2)
     p.type_ = WALL_TAG
-    p.mu_ *= 1000
+    p.mu_ = mu_wall
     return nothing
 end
 left_top_corner_particles = createRectangleParticles(
@@ -323,7 +316,7 @@ append!(particles, left_top_corner_particles)
 @inline function rightTopCornerParticleModify!(p::Particle)::Nothing
     p.normal_vec_ = (-kVecX - kVecY) / sqrt(2)
     p.type_ = WALL_TAG
-    p.mu_ *= 1000
+    p.mu_ = mu_wall
     return nothing
 end
 right_top_corner_particles = createRectangleParticles(
@@ -360,17 +353,13 @@ function main()::Nothing
     t = 0.0
     saveVTP(vtp_io, system, 0, t)
     updateBackgroundCellList!(system)
-    applyInteraction!(system, momentum!)
+    # simply use Euler forward method
     for step in ProgressBar(1:round(Int, t_end / dt))
-        applySelfaction!(system, updateVelocity!)
-        applySelfaction!(system, updatePosition!)
-        updateBackgroundCellList!(system)
         applyInteraction!(system, continuity!)
         applySelfaction!(system, updateDensityAndPressure!)
-        applySelfaction!(system, updatePosition!)
-        updateBackgroundCellList!(system)
         applyInteraction!(system, momentum!)
-        applySelfaction!(system, updateVelocity!)
+        applySelfaction!(system, updateVelocityAndPosition!)
+        updateBackgroundCellList!(system)
         if step % round(Int, output_dt / dt) == 0
             saveVTP(vtp_io, system, step, t)
         end

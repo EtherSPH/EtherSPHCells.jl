@@ -29,17 +29,14 @@ function main()::Nothing
     t = 0.0 # set the initial time to 0.0
     saveVTP(vtp_io, system, 0, t) # save the initial state to `.vtp`
     updateBackgroundCellList!(system) # update the background cell list
-    applyInteraction!(system, momentum!) # apply the momentum interaction
+    # simply euler forward method
     for step in ProgressBar(1:round(Int, t_end / dt)) # loop over the time steps
-        applySelfaction!(system, updateVelocity!) # accelerate the particles
-        applySelfaction!(system, updatePosition!) # move the particles
-        updateBackgroundCellList!(system) # update the background cell list
         applyInteraction!(system, continuity!) # continuity interaction
         applySelfaction!(system, updateDensityAndPressure!) # update the density and pressure
-        applySelfaction!(system, updatePosition!) # move the particles
-        updateBackgroundCellList!(system) # update the background cell list
         applyInteraction!(system, momentum!) # momentum interaction
         applySelfaction!(system, updateVelocity!) # accelerate the particles
+        applySelfaction!(system, updatePosition!) # move the particles
+        updateBackgroundCellList!(system) # update the background cell list, as long as `updatePosition!` is called
         if step % round(Int, output_dt / dt) == 0 # output the results
             saveVTP(vtp_io, system, step, t) # save the results to `.vtp`
         end

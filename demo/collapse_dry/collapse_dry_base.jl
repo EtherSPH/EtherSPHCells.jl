@@ -64,7 +64,7 @@ end
 
 @inline function updateDensityAndPressure!(p::Particle)::Nothing
     if p.type_ == FLUID_TAG # only apply on fluid particles
-        p.rho_ += p.drho_ * dt / 2 # half time step, update density
+        p.rho_ += p.drho_ * dt # update the density of the particle
         p.drho_ = 0.0 # reset the density change rate
         p.p_ = c^2 * (p.rho_ - rho_0) # weakly compressible fluid model
         return nothing
@@ -133,8 +133,7 @@ end
 
 @inline function updateVelocity!(p::Particle)::Nothing
     if p.type_ == FLUID_TAG # only apply on fluid particles
-        p.v_vec_ += (p.dv_vec_ + g) * dt / 2 # half time step, update velocity
-        p.dv_vec_ = kVec0 # reset the acceleration
+        p.v_vec_ += (p.dv_vec_ + g) * dt # update the velocity of the particle
         return nothing
     else
         return nothing
@@ -144,7 +143,8 @@ end
 
 @inline function updatePosition!(p::Particle)::Nothing
     if p.type_ == FLUID_TAG
-        p.x_vec_ += p.v_vec_ * dt / 2 # half time step, update position
+        p.x_vec_ += p.v_vec_ * dt # update the position of the particle
+        p.dv_vec_ = kVec0 # reset the acceleration
         return nothing
     else
         return nothing

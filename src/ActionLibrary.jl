@@ -136,6 +136,26 @@ Usually, pressure should be updated after this function is called, which depends
 end
 
 """
+    libUpdateTemperature!(p::T; dt::Float64 = 0.0)
+
+Update the temperature of the particle `p` with the time step `dt`.
+
+# Arguments:
+
+- `p` is a subtype of `AbstractParticle` with properties:
+    - `t_::Float64`: the temperature of the particle.
+    - `dt_::Float64`: the change rate of the temperature of the particle.
+
+# Returns:
+- `Nothing`
+"""
+@inline function libUpdateTemperature!(p::T; dt::Float64 = 0.0)::Nothing where {T <: AbstractParticle}
+    p.t_ += p.dt_ * dt
+    p.dt_ = 0.0
+    return nothing
+end
+
+"""
     libContinuity!(p::T, q::T, r::Float64; kernel_gradient::Float64 = 0.0)
 
 Update the continuity of the particle `p` and `q` with the distance `r` and the kernel gradient `kernel_gradient`.
@@ -348,5 +368,43 @@ Update the kernel average density filter of the particle `p` with the smoothing 
     p.rho_ = p.sum_kernel_weighted_value_ / p.sum_kernel_weight_
     p.sum_kernel_weight_ = 0.0
     p.sum_kernel_weighted_value_ = 0.0
+    return nothing
+end
+
+"""
+    libThermalConduction!(p::T, q::T, r::Float64; kernel_gradient::Float64 = 0.0, h::Float64 = 0.0)
+
+Update the thermal conduction of the particle `p` with the particle `q` and the distance `r`.
+
+# Arguments:
+
+- `p` and `q` are subtypes of `AbstractParticle` with properties:
+    - `t_::Float64`: the temperature of the particle.
+    - `dt_::Float64`: the change rate of the temperature of the particle.
+    - `kappa_::Float64`: the thermal conductivity of the particle.
+    - `rho_::Float64`: the density of the particle.
+    - `mass_::Float64`:
+    - `cp_::Float64`: the specific heat capacity of the particle.
+- `r` is the distance between the particles.
+- `kernel_gradient` is the gradient of the kernel function.
+- `h` is the smoothing length, sometimes is the half of the smoothing length to avoid sigularity.
+
+# Returns:
+- `Nothing`
+
+# Tips:
+
+solve such equation: ρcₚ∂T/∂t = ∇·(κ∇T), where κ is hamonic mean of κᵢ and κⱼ to handle discontinuous media.
+"""
+@inline function libThermalConduction!(
+    p::T,
+    q::T,
+    r::Float64;
+    kernel_gradient::Float64 = 0.0,
+    h::Float64 = 0.0,
+)::Nothing where {T <: AbstractParticle}
+    mean_kappa = harmonicMean(p.kappa_, q.kappa_)
+    heat = 2 * mean_kappa * r * kernel_gradient / p.rho_ / q.rho_ / (r^2 + 0.01 * h^2) * (p.t_ - q.t_)
+    p.dt_ += q.mass_ * heat / p.cp_
     return nothing
 end

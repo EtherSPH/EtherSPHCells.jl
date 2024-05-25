@@ -719,7 +719,7 @@ addVector!(vtp_io, "Normal", getNormalVector)
 
 vtp_io.step_digit_ = 4
 vtp_io.file_name_ = "cruchaga_3d"
-vtp_io.output_path_ = "example/results/cruchaga_3d_results"
+vtp_io.output_path_ = "example/results/cruchaga/cruchaga_3d_results"
 vtp_io
 
 function main()::Nothing

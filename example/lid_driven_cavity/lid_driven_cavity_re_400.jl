@@ -1,0 +1,337 @@
+#=
+  @ author: bcynuaa <bcynuaa@163.com> | callm1101 <Calm.Liu@outlook.com>
+  @ date: 2024/05/24 21:19:21
+  @ license: MIT
+  @ description:
+ =#
+
+using EtherSPHCells
+using Parameters
+using ProgressBars
+
+const reynolds_number = 400.0
+
+const dim = 2
+const dr = 0.01
+const h = 3 * dr
+
+const smooth_kernel = SmoothKernel(h, dim, CubicSpline)
+
+const lid_len = 1.0
+const wall_width = h
+
+const rho_0 = 1.0
+const mass = rho_0 * dr^dim
+const u_max = 1.0
+const c = 10 * u_max
+const mu = rho_0 * u_max * lid_len / reynolds_number
+const mu_wall = mu
+const p_0 = c^2 * 0.002 * rho_0
+const gamma = 7
+
+const dt = 0.1 * h / c
+const t_end = 16.0
+const output_dt = 100 * dt
+const density_filter_dt = 5 * dt
+
+const FLUID_TAG = 1
+const WALL_TAG = 2
+
+@inline function getPressureFromDensity(rho::Float64)::Float64
+    ratio = rho / rho_0
+    return c^2 / gamma * (ratio^gamma - 1) * rho_0 + p_0
+end
+
+@kwdef mutable struct Particle <: AbstractParticle
+    # must have properties:
+    x_vec_::RealVector = kVec0
+    rho_::Float64 = rho_0
+    mass_::Float64 = mass
+    type_::Int64 = FLUID_TAG
+    # additional properties:
+    p_::Float64 = p_0
+    drho_::Float64 = 0.0
+    v_vec_::RealVector = kVec0
+    dv_vec_::RealVector = kVec0
+    c_::Float64 = c
+    mu_::Float64 = mu
+    gap_::Float64 = dr
+    sum_kernel_weight_::Float64 = 0.0
+    sum_kernel_weighted_value_::Float64 = 0.0
+    normal_vec_::RealVector = kVec0
+end
+
+@inline function updateDensityAndPressure!(p::Particle)::Nothing
+    if p.type_ == FLUID_TAG
+        libUpdateDensity!(p; dt = dt)
+        p.p_ = getPressureFromDensity(p.rho_)
+        return nothing
+    else
+        return nothing
+    end
+    return nothing
+end
+
+@inline function continuity!(p::Particle, q::Particle, r::Float64)::Nothing
+    if p.type_ == FLUID_TAG && q.type_ == FLUID_TAG
+        kernel_gradient = kernelGradient(r, smooth_kernel)
+        libContinuity!(p, q, r; kernel_gradient = kernel_gradient)
+        return nothing
+    else
+        return nothing
+    end
+    return nothing
+end
+
+@inline function momentum!(p::Particle, q::Particle, r::Float64)::Nothing
+    if p.type_ == FLUID_TAG && q.type_ == FLUID_TAG
+        # * pressure term
+        kernel_value = kernelValue(r, smooth_kernel)
+        kernel_gradient = kernelGradient(r, smooth_kernel)
+        mean_gap = (p.gap_ + q.gap_) / 2
+        reference_kernel_value = kernelValue(mean_gap, smooth_kernel)
+        libPressureForce!(
+            p,
+            q,
+            r;
+            kernel_value = kernel_value,
+            kernel_gradient = kernel_gradient,
+            reference_kernel_value = reference_kernel_value,
+        )
+        # * viscosity term
+        libViscosityForce!(p, q, r; kernel_gradient = kernel_gradient, h = h / 2)
+        return nothing
+    elseif p.type_ == FLUID_TAG && q.type_ == WALL_TAG
+        kernel_value = kernelValue(r, smooth_kernel)
+        kernel_gradient = kernelGradient(r, smooth_kernel)
+        mean_gap = (p.gap_ + q.gap_) / 2
+        reference_kernel_value = kernelValue(mean_gap, smooth_kernel)
+        libPressureForce!(
+            p,
+            q,
+            r;
+            kernel_value = kernel_value,
+            kernel_gradient = kernel_gradient,
+            reference_kernel_value = reference_kernel_value,
+        )
+        # * viscosity term
+        libViscosityForce!(p, q, r; kernel_gradient = kernel_gradient, h = h / 2)
+        # * compulsive term
+        libCompulsiveForce!(p, q, r; h = h / 2)
+        return nothing
+    else
+        return nothing
+    end
+    return nothing
+end
+
+@inline function updateVelocityAndPosition!(p::Particle)::Nothing
+    if p.type_ == FLUID_TAG
+        libUpdateVelocityAndPosition!(p; dt = dt)
+        return nothing
+    else
+        return nothing
+    end
+    return nothing
+end
+
+@inline function densityFilter!(p::Particle, q::Particle, r::Float64;)::Nothing
+    if p.type_ == FLUID_TAG && q.type_ == FLUID_TAG
+        libKernelAverageDensityFilter!(p, q, r; smooth_kernel = smooth_kernel)
+        return nothing
+    else
+        return nothing
+    end
+    return nothing
+end
+
+@inline function densityFilter!(p::Particle)::Nothing
+    if p.type_ == FLUID_TAG
+        libKernelAverageDensityFilter!(p; smooth_kernel = smooth_kernel)
+        p.p_ = getPressureFromDensity(p.rho_)
+        return nothing
+    else
+        return nothing
+    end
+    return nothing
+end
+
+function createRectangleParticles(
+    ParticleType::DataType,
+    x0::Float64,
+    y0::Float64,
+    width::Float64,
+    height::Float64,
+    reference_dr::Float64;
+    modifyOnParticle!::Function = EtherSPHCells.noneFunction!,
+)::Vector{ParticleType}
+    particles = Vector{ParticleType}()
+    n_along_x = Int64(width / reference_dr |> round)
+    n_along_y = Int64(height / reference_dr |> round)
+    dx = width / n_along_x
+    dy = height / n_along_y
+    for i in 1:n_along_x, j in 1:n_along_y
+        particle = ParticleType()
+        x = x0 + (i - 0.5) * dx
+        y = y0 + (j - 0.5) * dy
+        particle.x_vec_ = RealVector(x, y, 0.0)
+        modifyOnParticle!(particle)
+        particle.mass_ = particle.rho_ * dx * dy
+        push!(particles, particle)
+    end
+    return particles
+end
+
+const x0 = 0.0
+const y0 = 0.0
+
+particles = Particle[]
+
+# * create fluid particles
+fluid_particles = createRectangleParticles(Particle, x0, y0, lid_len, lid_len, dr;)
+append!(particles, fluid_particles)
+
+@inline function bottomParticleModify!(p::Particle)::Nothing
+    p.normal_vec_ = kVecY
+    p.type_ = WALL_TAG
+    p.mu_ = mu_wall
+    return nothing
+end
+bottom_wall_particles = createRectangleParticles(
+    Particle,
+    x0,
+    y0 - wall_width,
+    lid_len,
+    wall_width,
+    dr;
+    (modifyOnParticle!) = bottomParticleModify!,
+)
+append!(particles, bottom_wall_particles)
+
+@inline function topParticleModify!(p::Particle)::Nothing
+    p.normal_vec_ = -kVecY
+    p.type_ = WALL_TAG
+    p.mu_ = mu_wall
+    p.v_vec_ = u_max * kVecX
+    return nothing
+end
+top_wall_particles = createRectangleParticles(
+    Particle,
+    x0 - wall_width,
+    y0 + lid_len,
+    lid_len + 2 * wall_width,
+    wall_width,
+    dr;
+    (modifyOnParticle!) = topParticleModify!,
+)
+append!(particles, top_wall_particles)
+
+@inline function leftParticleModify!(p::Particle)::Nothing
+    p.normal_vec_ = kVecX
+    p.type_ = WALL_TAG
+    p.mu_ = mu_wall
+    return nothing
+end
+left_wall_particles = createRectangleParticles(
+    Particle,
+    x0 - wall_width,
+    y0,
+    wall_width,
+    lid_len,
+    dr;
+    (modifyOnParticle!) = leftParticleModify!,
+)
+append!(particles, left_wall_particles)
+
+@inline function rightParticleModify!(p::Particle)::Nothing
+    p.normal_vec_ = -kVecX
+    p.type_ = WALL_TAG
+    p.mu_ = mu_wall
+    return nothing
+end
+right_wall_particles = createRectangleParticles(
+    Particle,
+    x0 + lid_len,
+    y0,
+    wall_width,
+    lid_len,
+    dr;
+    (modifyOnParticle!) = rightParticleModify!,
+)
+append!(particles, right_wall_particles)
+
+@inline function leftBottomParticleModify!(p::Particle)::Nothing
+    p.normal_vec_ = (kVecX + kVecY) / sqrt(2)
+    p.type_ = WALL_TAG
+    p.mu_ = mu_wall
+    return nothing
+end
+left_bottom_wall_particles = createRectangleParticles(
+    Particle,
+    x0 - wall_width,
+    y0 - wall_width,
+    wall_width,
+    wall_width,
+    dr;
+    (modifyOnParticle!) = leftBottomParticleModify!,
+)
+append!(particles, left_bottom_wall_particles)
+
+@inline function rightBottomParticleModify!(p::Particle)::Nothing
+    p.normal_vec_ = (-kVecX + kVecY) / sqrt(2)
+    p.type_ = WALL_TAG
+    p.mu_ = mu_wall
+    return nothing
+end
+right_bottom_wall_particles = createRectangleParticles(
+    Particle,
+    x0 + lid_len,
+    y0 - wall_width,
+    wall_width,
+    wall_width,
+    dr;
+    (modifyOnParticle!) = rightBottomParticleModify!,
+)
+append!(particles, right_bottom_wall_particles)
+
+start_point = RealVector(-h, -h, 0.0)
+end_point = RealVector(lid_len + h, lid_len + h, 0.0)
+system = ParticleSystem(Particle, h, start_point, end_point)
+append!(system.particles_, particles)
+
+vtp_io = VTPIO()
+@inline getPressure(p::Particle)::Float64 = p.p_
+@inline getVelocity(p::Particle)::RealVector = p.v_vec_
+@inline getNormalVector(p::Particle)::RealVector = p.normal_vec_
+addScalar!(vtp_io, "Pressure", getPressure)
+addVector!(vtp_io, "Velocity", getVelocity)
+addVector!(vtp_io, "Normal", getNormalVector)
+
+vtp_io.step_digit_ = 4
+vtp_io.file_name_ = "lid_driven_cavity_re_400_"
+vtp_io.output_path_ = "example/results/lid_driven_cavity/re_400"
+vtp_io
+
+function main()::Nothing
+    assurePathExist(vtp_io)
+    t = 0.0
+    saveVTP(vtp_io, system, 0, t)
+    updateBackgroundCellList!(system)
+    # simply use Euler forward method
+    for step in ProgressBar(1:round(Int, t_end / dt))
+        applyInteraction!(system, continuity!)
+        applySelfaction!(system, updateDensityAndPressure!)
+        applyInteraction!(system, momentum!)
+        applySelfaction!(system, updateVelocityAndPosition!)
+        updateBackgroundCellList!(system)
+        if step % round(Int, output_dt / dt) == 0
+            saveVTP(vtp_io, system, step, t)
+        end
+        if step % round(Int, density_filter_dt / dt) == 0
+            applyInteraction!(system, densityFilter!)
+            applySelfaction!(system, densityFilter!)
+        end
+        t += dt
+    end
+    return nothing
+end

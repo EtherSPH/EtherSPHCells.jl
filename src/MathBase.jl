@@ -42,6 +42,14 @@ end
     return sqrt(dot(x, x))
 end
 
+@inline function normalize(x::RealVector)::RealVector
+    if norm(x) == 0.0
+        return kVec0
+    else
+        return x / norm(x)
+    end
+end
+
 @inline function cross(x::RealVector, y::RealVector)::RealVector
     @inbounds return RealVector(x[2] * y[3] - x[3] * y[2], x[3] * y[1] - x[1] * y[3], x[1] * y[2] - x[2] * y[1])
 end

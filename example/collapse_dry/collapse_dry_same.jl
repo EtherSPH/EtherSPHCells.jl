@@ -1,6 +1,6 @@
 #=
   @ author: bcynuaa <bcynuaa@163.com> | callm1101 <Calm.Liu@outlook.com>
-  @ date: 2024/05/23 01:43:22
+  @ date: 2024/05/26 21:15:57
   @ license: MIT
   @ description:
  =#
@@ -8,6 +8,9 @@
 using EtherSPHCells
 using Parameters
 using ProgressBars
+
+# simply consider the wall as the same material as the fluid
+# copy from `SmoothedParticles.jl`
 
 const dim = 2
 const dr = 0.01
@@ -33,7 +36,7 @@ const nu = mu / rho_0
 const dt = 0.1 * h / c
 const t_end = 4.0
 const output_dt = 100 * dt
-const density_filter_dt = 20 * dt
+const density_filter_dt = 5 * dt
 
 const FLUID_TAG = 1
 const WALL_TAG = 2
@@ -57,30 +60,20 @@ const WALL_TAG = 2
     normal_vec_::RealVector = kVec0
 end
 
-@inline function updateDensityAndPressure!(p::Particle)::Nothing
-    if p.type_ == FLUID_TAG
-        libUpdateDensity!(p; dt = dt)
-        p.p_ = c^2 * (p.rho_ - rho_0)
-        return nothing
-    else
-        return nothing
-    end
+@inline function continuity!(p::Particle, q::Particle, r::Float64)::Nothing
+    kernel_gradient = kernelGradient(r, smooth_kernel)
+    libContinuity!(p, q, r; kernel_gradient = kernel_gradient)
     return nothing
 end
 
-@inline function continuity!(p::Particle, q::Particle, r::Float64)::Nothing
-    if p.type_ == FLUID_TAG && q.type_ == FLUID_TAG
-        kernel_gradient = kernelGradient(r, smooth_kernel)
-        libContinuity!(p, q, r; kernel_gradient = kernel_gradient)
-        return nothing
-    else
-        return nothing
-    end
+@inline function updateDensityAndPressure!(p::Particle)::Nothing
+    libUpdateDensity!(p; dt = dt)
+    p.p_ = c^2 * (p.rho_ - rho_0)
     return nothing
 end
 
 @inline function momentum!(p::Particle, q::Particle, r::Float64)::Nothing
-    if p.type_ == FLUID_TAG && q.type_ == FLUID_TAG
+    if p.type_ == FLUID_TAG
         # * pressure term
         kernel_value = kernelValue(r, smooth_kernel)
         kernel_gradient = kernelGradient(r, smooth_kernel)
@@ -96,16 +89,6 @@ end
         )
         # * viscosity term
         libViscosityForce!(p, q, r; kernel_gradient = kernel_gradient, h = h / 2)
-        return nothing
-    elseif p.type_ == FLUID_TAG && q.type_ == WALL_TAG
-        # * viscosity term
-        kernel_gradient = kernelGradient(r, smooth_kernel)
-        libViscosityForce!(p, q, r; kernel_gradient = kernel_gradient, h = h / 2)
-        # * compulsive term
-        libCompulsiveForce!(p, q, r; h = h / 2)
-        return nothing
-    else
-        return nothing
     end
     return nothing
 end
@@ -113,9 +96,6 @@ end
 @inline function updateVelocityAndPosition!(p::Particle)::Nothing
     if p.type_ == FLUID_TAG
         libUpdateVelocityAndPosition!(p; dt = dt, body_force_vec = g)
-        return nothing
-    else
-        return nothing
     end
     return nothing
 end
@@ -170,17 +150,9 @@ end
 const x0 = 0.0
 const y0 = 0.0
 
-function initialPressure!(p::Particle)::Nothing
-    depth = water_height - p.x_vec_[2]
-    p.p_ = rho_0 * gravity * depth
-    p.rho_ += p.p_ / p.c_^2
-    return nothing
-end
-
 particles = Particle[]
 
-fluid_particles =
-    createRectangleParticles(Particle, x0, y0, water_width, water_height, dr; modifyOnParticle! = initialPressure!)
+fluid_particles = createRectangleParticles(Particle, x0, y0, water_width, water_height, dr;)
 append!(particles, fluid_particles)
 
 @inline function bottomParticleModify!(p::Particle)::Nothing
@@ -281,8 +253,8 @@ addScalar!(vtp_io, "Pressure", getPressure)
 addVector!(vtp_io, "Velocity", getVelocity)
 addVector!(vtp_io, "Normal", getNormalVector)
 vtp_io.step_digit_ = 4
-vtp_io.file_name_ = "collapse_dry"
-vtp_io.output_path_ = "example/results/collapse_dry_results"
+vtp_io.file_name_ = "collapse_dry_same"
+vtp_io.output_path_ = "example/results/collapse_dry/same_wall"
 vtp_io
 
 function main()::Nothing

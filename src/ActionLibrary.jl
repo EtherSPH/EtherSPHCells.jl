@@ -227,6 +227,45 @@ In SPH method, to avoid too close distance, a cofficient 0.01 Wᵢⱼ/W(Δp) is 
 end
 
 """
+    libMirrorPressureForce!(p::T, q::T, r::Float64; kernel_value::Float64 = 0.0, kernel_gradient::Float64 = 0.0, reference_kernel_value::Float64 = 1.0)
+
+Update the mirror pressure force of the particle `p` with the particle `q` and the distance `r`.
+
+# Arguments:
+
+- `p` and `q` are subtypes of `AbstractParticle` with properties:
+    - `p_::Float64`: the pressure of the particle.
+    - `rho_::Float64`: the density of the particle.
+    - `mass_::Float64`:
+    - `x_vec_::RealVector`: the position of the particle.
+    - `dv_vec_::RealVector`: the acceleration of the particle.
+- `r` is the distance between the particles.
+- `kernel_value` is the value of the kernel function.
+- `kernel_gradient` is the gradient of the kernel function.
+- `reference_kernel_value` is the value of the kernel function at the reference distance.
+
+# Returns:
+- `Nothing`
+
+# Tips:
+
+Similar to `libPressureForce!`, but the pressure term is given mirrorly by `p` particle, `q` only provides position.
+"""
+@inline function libMirrorPressureForce!(
+    p::T,
+    q::T,
+    r::Float64;
+    kernel_value::Float64 = 0.0,
+    kernel_gradient::Float64 = 0.0,
+    reference_kernel_value::Float64 = 1.0,
+)::Nothing where {T <: AbstractParticle}
+    p_rho_2 = p.p_ / p.rho_^2 * 2
+    p_rho_2 += abs(p_rho_2) * 0.01 * kernel_value / reference_kernel_value
+    p.dv_vec_ += -p.mass_ * p_rho_2 * kernel_gradient / r * (p.x_vec_ - q.x_vec_)
+    return nothing
+end
+
+"""
     libViscosityForce!(p::T, q::T, r::Float64; kernel_gradient::Float64 = 0.0, h::Float64 = 1.0)
 
 Update the viscosity force of the particle `p` with the particle `q` and the distance `r`.

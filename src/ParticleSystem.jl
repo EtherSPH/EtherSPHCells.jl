@@ -85,7 +85,9 @@ function updateBackgroundCellList!(particle_system::ParticleSystem)::Nothing
     # * for reset particles will change their global ids
     Threads.@threads for particle_global_id in eachindex(particle_system.particles_)
         particle_position = particle_system.particles_[particle_global_id].x_vec_
-        if !isInBackgroundCellList(particle_position, particle_system.background_cell_list_)
+        if !isInBackgroundCellList(particle_position, particle_system.background_cell_list_) ||
+           getGlobalIndexInBackgroundCellList(particle_position, particle_system.background_cell_list_) >
+           length(particle_system.background_cell_list_.cell_list_)
             addParticleToCell!(particle_system.background_cell_list_.to_be_removed_cell_, particle_global_id)
         end
     end

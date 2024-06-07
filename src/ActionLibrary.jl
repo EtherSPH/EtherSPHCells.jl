@@ -295,11 +295,10 @@ Update the viscosity force of the particle `p` with the particle `q` and the dis
     q::T,
     r::Float64;
     kernel_gradient::Float64 = 0.0,
-    h::Float64 = 1.0,
+    h::Float64 = 0.0,
 )::Nothing where {T <: AbstractParticle}
     mean_mu = harmonicMean(p.mu_, q.mu_)
-    sum_rho = p.rho_ + q.rho_
-    viscosity_force = 8 * mean_mu * kernel_gradient * r / sum_rho^2 / (r^2 + 0.01 * h^2)
+    viscosity_force = 2 * mean_mu * kernel_gradient * r / p.rho_ / q.rho_ / (r^2 + 0.01 * h^2)
     p.dv_vec_ += q.mass_ * viscosity_force * (p.v_vec_ - q.v_vec_)
     return nothing
 end
@@ -445,5 +444,114 @@ solve such equation: ρcₚ∂T/∂t = ∇·(κ∇T), where κ is hamonic mean o
     mean_kappa = harmonicMean(p.kappa_, q.kappa_)
     heat = 2 * mean_kappa * r * kernel_gradient / p.rho_ / q.rho_ / (r^2 + 0.01 * h^2) * (p.t_ - q.t_)
     p.dt_ += q.mass_ * heat / p.cp_
+    return nothing
+end
+
+"""
+    libRiemannSolutionZhang(rho_l, rho_r, u_l, u_r, p_l, p_r, c_0, mean_c, mean_v_vec, e_ij; eta=3.0)
+
+Compute the Riemann solution using the Zhang method.
+
+# Arguments
+- `rho_l::Float64`: Left density
+- `rho_r::Float64`: Right density
+- `u_l::Float64`: Left velocity
+- `u_r::Float64`: Right velocity
+- `p_l::Float64`: Left pressure
+- `p_r::Float64`: Right pressure
+- `c_0::Float64`: Sound speed
+- `mean_c::Float64`: Mean sound speed
+- `mean_v_vec::RealVector`: Mean velocity vector
+- `e_ij::RealVector`: Unit vector in the direction of the interface
+
+# Optional Arguments
+- `eta::Float64 = 3.0`: Dissipation limiter η (default: 3.0)
+
+# Returns
+- `v_riemann_vec::RealVector`: Riemann velocity vector
+- `p_riemann::Float64`: Riemann pressure
+
+# Tips
+- A weakly compressible SPH method based on a low-dissipation Riemann solver, C. Zhang, X.Y. Hu, N.A. Adams, http://dx.doi.org/10.1016/j.jcp.2017.01.027
+- Dual-criteria time stepping for weakly compressible smoothed particle hydrodynamics, Chi Zhang, Massoud Rezavand, Xiangyu Hu, https://doi.org/10.1016/j.jcp.2019.109135
+- https://www.sphinxsys.org/html/theory.html
+"""
+@inline function weaklyCompressibleRiemannSolutionZhang(
+    rho_l::Float64,
+    rho_r::Float64,
+    u_l::Float64,
+    u_r::Float64,
+    p_l::Float64,
+    p_r::Float64,
+    c_0::Float64, # sound speed
+    mean_c::Float64, # mean sound speed
+    mean_v_vec::RealVector,
+    e_ij::RealVector; # -\vec{r}ᵢⱼ / rᵢⱼ
+    eta::Float64 = 3.0, # dissipation limiter η , recommended value is 3.0 here
+)::Tuple{RealVector, Float64} # return (v*, p*)
+    mean_rho = (rho_l + rho_r) / 2
+    mean_u = (u_l + u_r) / 2
+    mean_p = (p_l + p_r) / 2
+    u_riemann = mean_u + 0.5 * (p_l - p_r) / mean_rho / c_0
+    p_riemann = mean_p + 0.5 * (u_l - u_r) * mean_rho * min(eta * max(u_l - u_r, 0.0), mean_c)
+    v_riemann_vec = u_riemann * e_ij + (mean_v_vec - mean_u * e_ij)
+    return v_riemann_vec, p_riemann
+end
+
+@inline function libWeaklyCompressibleRiemannZhang!(
+    p::T,
+    q::T,
+    r::Float64;
+    kernel_gradient::Float64 = 0.0,
+    c_0::Float64 = 1.0,
+    eta::Float64 = 3.0,
+)::Nothing where {T <: AbstractParticle}
+    e_ij = -(p.x_vec_ - q.x_vec_) / r
+    v_riemann_vec, p_riemann = weaklyCompressibleRiemannSolutionZhang(
+        p.rho_,
+        q.rho_,
+        dot(p.v_vec_, e_ij),
+        dot(q.v_vec_, e_ij),
+        p.p_,
+        q.p_,
+        c_0,
+        (p.c_ + q.c_) / 2,
+        (p.v_vec_ + q.v_vec_) / 2,
+        e_ij;
+        eta = eta,
+    )
+    p.drho_ += 2 * p.rho_ * q.mass_ / q.rho_ * dot(p.v_vec_ - v_riemann_vec, -e_ij) * kernel_gradient
+    p.dv_vec_ += -2 * q.mass_ * p_riemann / p.rho_ / q.rho_ * kernel_gradient * (-e_ij)
+    return nothing
+end
+
+@inline function libWeaklyCompressibleRiemannWallZhang!(
+    p::T,
+    q::T,
+    r::Float64;
+    kernel_gradient::Float64 = 0.0,
+    c_0::Float64 = 1.0,
+    eta::Float64 = 3.0,
+    body_force_vec::RealVector = kVec0,
+)::Nothing where {T <: AbstractParticle}
+    u_w = dot(q.normal_vec_, q.v_vec_)
+    e_ij = -(p.x_vec_ - q.x_vec_) / r
+    u_l = -dot(p.v_vec_, q.normal_vec_)
+    u_r = -u_l + 2 * u_w
+    v_riemann_vec, p_riemann = weaklyCompressibleRiemannSolutionZhang(
+        p.rho_,
+        p.rho_,
+        u_l,
+        u_r,
+        p.p_,
+        p.p_ + p.rho_ * dot(body_force_vec, q.x_vec_ - p.x_vec_),
+        c_0,
+        p.c_,
+        (p.v_vec_ + q.v_vec_) / 2,
+        -q.normal_vec_;
+        eta = eta,
+    )
+    p.drho_ += 2 * p.rho_ * q.mass_ / q.rho_ * dot(p.v_vec_ - v_riemann_vec, -e_ij) * kernel_gradient
+    p.dv_vec_ += -2 * q.mass_ * p_riemann / p.rho_ / q.rho_ * kernel_gradient * (-e_ij)
     return nothing
 end

@@ -1,0 +1,301 @@
+#=
+  @ author: bcynuaa <bcynuaa@163.com> | callm1101 <Calm.Liu@outlook.com> | vox-1 <xur2006@163.com>
+  @ date: 2024/06/07 14:12:49
+  @ license: MIT
+  @ description:
+ =#
+
+# - A weakly compressible SPH method based on a low-dissipation Riemann solver, C. Zhang, X.Y. Hu, N.A. Adams, http://dx.doi.org/10.1016/j.jcp.2017.01.027
+# - Dual-criteria time stepping for weakly compressible smoothed particle hydrodynamics, Chi Zhang, Massoud Rezavand, Xiangyu Hu, https://doi.org/10.1016/j.jcp.2019.109135
+# - https://www.sphinxsys.org/html/theory.html
+
+using EtherSPHCells
+using Parameters
+using ProgressBars
+
+const dim = 2
+const dr = 0.01
+const h = 3 * dr
+
+const smooth_kernel = SmoothKernel(h, dim, CubicSpline)
+
+const water_width = 1.0
+const water_height = 2.0
+const box_width = 4.0
+const box_height = 3.0
+const wall_width = h
+
+const rho_0 = 1000.0
+const mass = rho_0 * dr^dim
+const gravity = 9.8
+const c = 10 * sqrt(2 * gravity * water_height)
+const g = RealVector(0.0, -gravity, 0.0)
+const mu = 1e-3
+const mu_wall = mu * 1000
+const nu = mu / rho_0
+
+const dt = 0.1 * h / c
+const t_end = 4.0
+const output_dt = 100 * dt
+const density_filter_dt = 5 * dt
+
+const FLUID_TAG = 1
+const WALL_TAG = 2
+
+@kwdef mutable struct Particle <: AbstractParticle
+    # must have properties:
+    x_vec_::RealVector = kVec0
+    rho_::Float64 = rho_0
+    mass_::Float64 = mass
+    type_::Int64 = FLUID_TAG
+    # additional properties:
+    p_::Float64 = 0.0
+    drho_::Float64 = 0.0
+    v_vec_::RealVector = kVec0
+    dv_vec_::RealVector = kVec0
+    c_::Float64 = c
+    mu_::Float64 = mu
+    gap_::Float64 = dr
+    sum_kernel_weight_::Float64 = 0.0
+    sum_kernel_weighted_value_::Float64 = 0.0
+    normal_vec_::RealVector = kVec0
+end
+
+@inline function updateDensityAndPressure!(p::Particle)::Nothing
+    if p.type_ == FLUID_TAG
+        libUpdateDensity!(p; dt = dt)
+        p.p_ = c^2 * (p.rho_ - rho_0)
+        return nothing
+    else
+        return nothing
+    end
+    return nothing
+end
+
+const eta = 5.0
+@inline function riemannZhang!(p::Particle, q::Particle, r::Float64)::Nothing
+    if p.type_ == FLUID_TAG && q.type_ == FLUID_TAG
+        kernel_gradient = kernelGradient(r, smooth_kernel)
+        libWeaklyCompressibleRiemannZhang!(p, q, r; kernel_gradient = kernel_gradient, eta = eta, c_0 = c)
+        return nothing
+    elseif p.type_ == FLUID_TAG && q.type_ == WALL_TAG
+        kernel_gradient = kernelGradient(r, smooth_kernel)
+        libWeaklyCompressibleRiemannWallZhang!(
+            p,
+            q,
+            r;
+            kernel_gradient = kernel_gradient,
+            eta = eta,
+            c_0 = c,
+            body_force_vec = g,
+        )
+    end
+    return nothing
+end
+
+@inline function viscosity!(p::Particle, q::Particle, r::Float64)::Nothing
+    if p.type_ == FLUID_TAG
+        kernel_gradient = kernelGradient(r, smooth_kernel)
+        libViscosityForce!(p, q, r; kernel_gradient = kernel_gradient, h = h / 2)
+    end
+    return nothing
+end
+
+@inline function updateVelocityAndPosition!(p::Particle)::Nothing
+    if p.type_ == FLUID_TAG
+        libUpdateVelocityAndPosition!(p; dt = dt, body_force_vec = g)
+        return nothing
+    else
+        return nothing
+    end
+    return nothing
+end
+
+@inline function densityFilter!(p::Particle, q::Particle, r::Float64;)::Nothing
+    if p.type_ == FLUID_TAG && q.type_ == FLUID_TAG
+        libKernelAverageDensityFilter!(p, q, r; smooth_kernel = smooth_kernel)
+        return nothing
+    else
+        return nothing
+    end
+    return nothing
+end
+
+@inline function densityFilter!(p::Particle)::Nothing
+    if p.type_ == FLUID_TAG
+        libKernelAverageDensityFilter!(p; smooth_kernel = smooth_kernel)
+        p.p_ = c^2 * (p.rho_ - rho_0)
+        return nothing
+    else
+        return nothing
+    end
+    return nothing
+end
+
+function createRectangleParticles(
+    ParticleType::DataType,
+    x0::Float64,
+    y0::Float64,
+    width::Float64,
+    height::Float64,
+    reference_dr::Float64;
+    modifyOnParticle!::Function = EtherSPHCells.noneFunction!,
+)::Vector{ParticleType}
+    particles = Vector{ParticleType}()
+    n_along_x = Int64(width / reference_dr |> round)
+    n_along_y = Int64(height / reference_dr |> round)
+    dx = width / n_along_x
+    dy = height / n_along_y
+    for i in 1:n_along_x, j in 1:n_along_y
+        particle = ParticleType()
+        x = x0 + (i - 0.5) * dx
+        y = y0 + (j - 0.5) * dy
+        particle.x_vec_ = RealVector(x, y, 0.0)
+        modifyOnParticle!(particle)
+        particle.mass_ = particle.rho_ * dx * dy
+        push!(particles, particle)
+    end
+    return particles
+end
+
+const x0 = 0.0
+const y0 = 0.0
+
+function initialPressure!(p::Particle)::Nothing
+    depth = water_height - p.x_vec_[2]
+    p.p_ = rho_0 * gravity * depth
+    p.rho_ += p.p_ / p.c_^2
+    return nothing
+end
+
+particles = Particle[]
+
+fluid_particles =
+    createRectangleParticles(Particle, x0, y0, water_width, water_height, dr; modifyOnParticle! = initialPressure!)
+append!(particles, fluid_particles)
+
+@inline function bottomParticleModify!(p::Particle)::Nothing
+    p.normal_vec_ = kVecY
+    p.type_ = WALL_TAG
+    p.mu_ = mu_wall
+    return nothing
+end
+bottom_wall_particles = createRectangleParticles(
+    Particle,
+    x0,
+    y0 - wall_width,
+    box_width,
+    wall_width,
+    dr;
+    modifyOnParticle! = bottomParticleModify!,
+)
+append!(particles, bottom_wall_particles)
+
+@inline function leftWallParticleModify!(p::Particle)::Nothing
+    p.normal_vec_ = kVecX
+    p.type_ = WALL_TAG
+    p.mu_ = mu_wall
+    return nothing
+end
+left_wall_particles = createRectangleParticles(
+    Particle,
+    x0 - wall_width,
+    y0,
+    wall_width,
+    box_height,
+    dr;
+    modifyOnParticle! = leftWallParticleModify!,
+)
+append!(particles, left_wall_particles)
+
+@inline function rightWallParticleModify!(p::Particle)::Nothing
+    p.normal_vec_ = -kVecX
+    p.type_ = WALL_TAG
+    p.mu_ = mu_wall
+    return nothing
+end
+right_wall_particles = createRectangleParticles(
+    Particle,
+    x0 + box_width,
+    y0,
+    wall_width,
+    box_height,
+    dr;
+    modifyOnParticle! = rightWallParticleModify!,
+)
+append!(particles, right_wall_particles)
+
+@inline function leftBottomCornerParticleModify!(p::Particle)::Nothing
+    p.normal_vec_ = (kVecX + kVecY) / sqrt(2)
+    p.type_ = WALL_TAG
+    p.mu_ = mu_wall
+    return nothing
+end
+left_bottom_corner_particles = createRectangleParticles(
+    Particle,
+    x0 - wall_width,
+    y0 - wall_width,
+    wall_width,
+    wall_width,
+    dr;
+    modifyOnParticle! = leftBottomCornerParticleModify!,
+)
+append!(particles, left_bottom_corner_particles)
+
+@inline function rightBottomCornerParticleModify!(p::Particle)::Nothing
+    p.normal_vec_ = (-kVecX + kVecY) / sqrt(2)
+    p.type_ = WALL_TAG
+    p.mu_ = mu_wall
+    return nothing
+end
+right_bottom_corner_particles = createRectangleParticles(
+    Particle,
+    x0 + box_width,
+    y0 - wall_width,
+    wall_width,
+    wall_width,
+    dr;
+    modifyOnParticle! = rightBottomCornerParticleModify!,
+)
+append!(particles, right_bottom_corner_particles)
+
+start_point = RealVector(-h, -h, 0.0)
+end_point = RealVector(box_width + h, box_height + h, 0.0)
+system = ParticleSystem(Particle, h, start_point, end_point)
+append!(system.particles_, particles)
+
+vtp_io = VTPIO()
+@inline getPressure(p::Particle)::Float64 = p.p_
+@inline getVelocity(p::Particle)::RealVector = p.v_vec_
+@inline getNormalVector(p::Particle)::RealVector = p.normal_vec_
+addScalar!(vtp_io, "Pressure", getPressure)
+addVector!(vtp_io, "Velocity", getVelocity)
+addVector!(vtp_io, "Normal", getNormalVector)
+vtp_io.step_digit_ = 4
+vtp_io.file_name_ = "collapse_dry_rieamnn_zhang"
+vtp_io.output_path_ = "example/results/collapse_dry/riemann_zhang"
+vtp_io
+
+function main()::Nothing
+    assurePathExist(vtp_io)
+    t = 0.0
+    saveVTP(vtp_io, system, 0, t)
+    updateBackgroundCellList!(system)
+    # simply use Euler forward method
+    for step in ProgressBar(1:round(Int, t_end / dt))
+        applyInteraction!(system, riemannZhang!)
+        applySelfaction!(system, updateDensityAndPressure!)
+        applyInteraction!(system, viscosity!)
+        applySelfaction!(system, updateVelocityAndPosition!)
+        updateBackgroundCellList!(system)
+        if step % round(Int, output_dt / dt) == 0
+            saveVTP(vtp_io, system, step, t)
+        end
+        if step % round(Int, density_filter_dt / dt) == 0
+            applyInteraction!(system, densityFilter!)
+            applySelfaction!(system, densityFilter!)
+        end
+        t += dt
+    end
+    return nothing
+end

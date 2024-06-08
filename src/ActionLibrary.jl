@@ -534,20 +534,22 @@ end
     eta::Float64 = 3.0,
     body_force_vec::RealVector = kVec0,
 )::Nothing where {T <: AbstractParticle}
-    u_w = dot(q.normal_vec_, q.v_vec_)
+    u_w = -dot(q.normal_vec_, q.v_vec_)
     e_ij = -(p.x_vec_ - q.x_vec_) / r
-    u_l = -dot(p.v_vec_, q.normal_vec_)
+    u_l = -dot(q.normal_vec_, p.v_vec_)
     u_r = -u_l + 2 * u_w
+    p_r = p.p_ + p.rho_ * dot(body_force_vec, q.x_vec_ - p.x_vec_)
     v_riemann_vec, p_riemann = weaklyCompressibleRiemannSolutionZhang(
         p.rho_,
         p.rho_,
         u_l,
         u_r,
         p.p_,
-        p.p_ + p.rho_ * dot(body_force_vec, q.x_vec_ - p.x_vec_),
+        p_r,
         c_0,
         p.c_,
         (p.v_vec_ + q.v_vec_) / 2,
+        # e_ij;
         -q.normal_vec_;
         eta = eta,
     )
